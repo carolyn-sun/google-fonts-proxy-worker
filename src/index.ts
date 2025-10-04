@@ -38,38 +38,34 @@ export default {
       if (response.ok) {
         let proxyResponse: Response;
 
-        if (targetHost === 'fonts.googleapis.com') {
-          try {
-            const arrayBuffer = await response.arrayBuffer();
-            const cssText = new TextDecoder().decode(arrayBuffer);
-            console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
+        try {
+          const arrayBuffer = await response.arrayBuffer();
+          const cssText = new TextDecoder().decode(arrayBuffer);
+          console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
 
-            const proxyDomain = env.PROXY_DOMAIN || url.host;
-            const proxyUrl = `https://${proxyDomain}`;
+          const proxyDomain = env.PROXY_DOMAIN || url.host;
+          const proxyUrl = `https://${proxyDomain}`;
 
-            let modifiedCss = cssText
-              .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
-              .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
-              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
-              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
-              .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
-              .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
+          let modifiedCss = cssText
+            .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
+            .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
+            .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
+            .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
+            .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
+            .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
 
-            console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
-            console.log(`Using proxy domain: ${proxyDomain}`);
+          console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
+          console.log(`Using proxy domain: ${proxyDomain}`);
 
-            proxyResponse = new Response(modifiedCss, response);
-            proxyResponse.headers.set('Content-Type', 'text/css');
-          } catch (modError: unknown) {
-            console.error(`CSS modification error: ${(modError as Error).message}`);
+          proxyResponse = new Response(modifiedCss, response);
+          proxyResponse.headers.set('Content-Type', 'text/css');
+        } catch (modError: unknown) {
+          console.error(`CSS modification error: ${(modError as Error).message}`);
 
-            proxyResponse = new Response(response.body, response);
-          }
-        } else {
           proxyResponse = new Response(response.body, response);
         }
 
-        proxyResponse.headers.set('Cache-Control', 'public, max-age=31536000');
+        proxyResponse.headers.set('Cache-Control', 'public, max-age=315360');
         proxyResponse.headers.set('Access-Control-Allow-Origin', '*');
 
         ctx.waitUntil(cache.put(request, proxyResponse.clone()));
