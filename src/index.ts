@@ -41,10 +41,11 @@ export default {
             const cssText = new TextDecoder().decode(arrayBuffer);
             console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
 
-            const modifiedCss = cssText.replace(
-              /https:\/\/fonts\.gstatic\.com\//g,
-              '/'
-            );
+            let modifiedCss = cssText
+              .replace(/https:\/\/fonts\.gstatic\.com\//g, '/')
+              .replace(/https:\/\/fonts\.googleapis\.com\//g, '/')
+              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, 'url(/')
+              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, 'url(/');
 
             console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
 
