@@ -1,4 +1,7 @@
-export interface Env {}
+export interface Env {
+  PROXY_DOMAIN?: string;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -41,13 +44,19 @@ export default {
             const cssText = new TextDecoder().decode(arrayBuffer);
             console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
 
+            const proxyDomain = env.PROXY_DOMAIN || url.host;
+            const proxyUrl = `https://${proxyDomain}`;
+
             let modifiedCss = cssText
-              .replace(/https:\/\/fonts\.gstatic\.com\//g, '/')
-              .replace(/https:\/\/fonts\.googleapis\.com\//g, '/')
-              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, 'url(/')
-              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, 'url(/');
+              .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
+              .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
+              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
+              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
+              .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
+              .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
 
             console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
+            console.log(`Using proxy domain: ${proxyDomain}`);
 
             proxyResponse = new Response(modifiedCss, response);
             proxyResponse.headers.set('Content-Type', 'text/css');
