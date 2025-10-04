@@ -36,13 +36,25 @@ export default {
         let proxyResponse: Response;
 
         if (targetHost === 'fonts.googleapis.com') {
-          const cssText = await response.text();
-          const modifiedCss = cssText.replace(
-            /https:\/\/fonts\.gstatic\.com\//g,
-            '/'
-          );
-          proxyResponse = new Response(modifiedCss, response);
-          proxyResponse.headers.set('Content-Type', 'text/css');
+          try {
+            const arrayBuffer = await response.arrayBuffer();
+            const cssText = new TextDecoder().decode(arrayBuffer);
+            console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
+
+            const modifiedCss = cssText.replace(
+              /https:\/\/fonts\.gstatic\.com\//g,
+              '/'
+            );
+
+            console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
+
+            proxyResponse = new Response(modifiedCss, response);
+            proxyResponse.headers.set('Content-Type', 'text/css');
+          } catch (modError: unknown) {
+            console.error(`CSS modification error: ${(modError as Error).message}`);
+
+            proxyResponse = new Response(response.body, response);
+          }
         } else {
           proxyResponse = new Response(response.body, response);
         }
