@@ -8,7 +8,6 @@ export default {
     const url = new URL(request.url);
     console.log(`Proxying request to: ${url.pathname}${url.search}`);
 
-    // 缓存清除端点
     if (url.pathname === '/purge-cache') {
       const providedKey = url.searchParams.get('key');
       const requiredKey = env.CACHE_PURGE_KEY;
@@ -21,11 +20,9 @@ export default {
       const targetUrl = url.searchParams.get('url');
       
       if (targetUrl) {
-        // 清除特定 URL
         await cache.delete(targetUrl);
         return new Response(`Cache cleared for: ${targetUrl}`);
       } else {
-        // 尝试清除所有相关缓存
         const purgePromises = [];
         const commonUrls = [
           '/css',
@@ -75,6 +72,7 @@ export default {
         let proxyResponse: Response;
 
         if (targetHost === 'fonts.googleapis.com') {
+          // 只对 CSS 文件进行文本处理
           try {
             const arrayBuffer = await response.arrayBuffer();
             const cssText = new TextDecoder().decode(arrayBuffer);
@@ -102,6 +100,11 @@ export default {
           }
         } else {
           proxyResponse = new Response(response.body, response);
+          
+          const contentType = response.headers.get('Content-Type');
+          if (contentType) {
+            proxyResponse.headers.set('Content-Type', contentType);
+          }
         }
 
         proxyResponse.headers.set('Cache-Control', 'public, max-age=315360');
