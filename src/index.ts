@@ -8,6 +8,10 @@ export default {
     const url = new URL(request.url);
     console.log(`Proxying request to: ${url.pathname}${url.search}`);
 
+    if (url.pathname === '/' || url.pathname === '') {
+      return Response.redirect('https://github.com/carolyn-sun/google-fonts-proxy-worker', 302);
+    }
+
     if (url.pathname === '/purge-cache') {
       const providedKey = url.searchParams.get('key');
       const requiredKey = env.CACHE_PURGE_KEY;
