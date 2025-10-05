@@ -1,11 +1,47 @@
 export interface Env {
   PROXY_DOMAIN?: string;
+  CACHE_PURGE_KEY?: string;
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     console.log(`Proxying request to: ${url.pathname}${url.search}`);
+
+    // 缓存清除端点
+    if (url.pathname === '/purge-cache') {
+      const providedKey = url.searchParams.get('key');
+      const requiredKey = env.CACHE_PURGE_KEY;
+      
+      if (requiredKey && providedKey !== requiredKey) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      
+      const cache = caches.default;
+      const targetUrl = url.searchParams.get('url');
+      
+      if (targetUrl) {
+        // 清除特定 URL
+        await cache.delete(targetUrl);
+        return new Response(`Cache cleared for: ${targetUrl}`);
+      } else {
+        // 尝试清除所有相关缓存
+        const purgePromises = [];
+        const commonUrls = [
+          '/css',
+          '/css2',
+          '/s/'
+        ];
+        
+        for (const path of commonUrls) {
+          const cacheKey = new URL(path, url.origin).toString();
+          purgePromises.push(cache.delete(cacheKey));
+        }
+        
+        await Promise.all(purgePromises);
+        return new Response('Common cache entries cleared');
+      }
+    }
 
     let targetHost: string;
     if (url.pathname.startsWith('/css') || url.pathname.startsWith('/css2')) {
@@ -38,30 +74,33 @@ export default {
       if (response.ok) {
         let proxyResponse: Response;
 
-        try {
-          const arrayBuffer = await response.arrayBuffer();
-          const cssText = new TextDecoder().decode(arrayBuffer);
-          console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
+        if (targetHost === 'fonts.googleapis.com') {
+          try {
+            const arrayBuffer = await response.arrayBuffer();
+            const cssText = new TextDecoder().decode(arrayBuffer);
+            console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
 
-          const proxyDomain = env.PROXY_DOMAIN || url.host;
-          const proxyUrl = `https://${proxyDomain}`;
+            const proxyDomain = env.PROXY_DOMAIN || url.host;
+            const proxyUrl = `https://${proxyDomain}`;
 
-          let modifiedCss = cssText
-            .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
-            .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
-            .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
-            .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
-            .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
-            .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
+            let modifiedCss = cssText
+              .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
+              .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
+              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
+              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
+              .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
+              .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
 
-          console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
-          console.log(`Using proxy domain: ${proxyDomain}`);
+            console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
+            console.log(`Using proxy domain: ${proxyDomain}`);
 
-          proxyResponse = new Response(modifiedCss, response);
-          proxyResponse.headers.set('Content-Type', 'text/css');
-        } catch (modError: unknown) {
-          console.error(`CSS modification error: ${(modError as Error).message}`);
-
+            proxyResponse = new Response(modifiedCss, response);
+            proxyResponse.headers.set('Content-Type', 'text/css');
+          } catch (modError: unknown) {
+            console.error(`CSS modification error: ${(modError as Error).message}`);
+            proxyResponse = new Response(response.body, response);
+          }
+        } else {
           proxyResponse = new Response(response.body, response);
         }
 
