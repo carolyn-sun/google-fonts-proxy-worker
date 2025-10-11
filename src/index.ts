@@ -13,7 +13,6 @@ export default {
       return Response.redirect('https://github.com/carolyn-sun/google-fonts-proxy-worker', 302);
     }
 
-    // 访问控制检查
     const allowedOrigins = env.ALLOWED_ORIGINS;
     if (allowedOrigins) {
       const referer = request.headers.get('Referer');
@@ -23,7 +22,12 @@ export default {
       
       if (requestOrigin) {
         const allowedList = allowedOrigins.split(',').map(domain => domain.trim());
-        const isAllowed = allowedList.some(allowedDomain => {
+        
+        const proxyDomain = env.PROXY_DOMAIN || url.host;
+        const isProxyDomain = requestOrigin === `https://${proxyDomain}` || 
+                             requestOrigin === `http://${proxyDomain}`;
+        
+        const isAllowed = isProxyDomain || allowedList.some(allowedDomain => {
           return requestOrigin === `https://${allowedDomain}` || 
                  requestOrigin === `http://${allowedDomain}` ||
                  requestOrigin.endsWith(`.${allowedDomain}`);
@@ -113,7 +117,6 @@ export default {
         let proxyResponse: Response;
 
         if (targetHost === 'fonts.googleapis.com') {
-          // 只对 CSS 文件进行文本处理
           try {
             const arrayBuffer = await response.arrayBuffer();
             const cssText = new TextDecoder().decode(arrayBuffer);
