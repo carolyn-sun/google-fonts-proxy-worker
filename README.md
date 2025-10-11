@@ -6,5 +6,6 @@ A Cloudflare Worker that proxies Google Fonts requests to improve performance an
 
 - `CACHE_PURGE_KEY`: A secret key used to authorize cache purge requests.
 - `PROXY_DOMAIN`: The domain used for proxying requests (default: the original request's host).
+- `ALLOWED_ORIGINS`: A comma-separated list of allowed origins for CORS.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fcarolyn-sun%2Fgoogle-fonts-proxy-worker)

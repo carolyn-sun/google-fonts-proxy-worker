@@ -1,6 +1,7 @@
 export interface Env {
   PROXY_DOMAIN?: string;
   CACHE_PURGE_KEY?: string;
+  ALLOWED_ORIGINS?: string; // csv of allowed origins for CORS
 }
 
 export default {
@@ -10,6 +11,42 @@ export default {
 
     if (url.pathname === '/' || url.pathname === '') {
       return Response.redirect('https://github.com/carolyn-sun/google-fonts-proxy-worker', 302);
+    }
+
+    // 访问控制检查
+    const allowedOrigins = env.ALLOWED_ORIGINS;
+    if (allowedOrigins) {
+      const referer = request.headers.get('Referer');
+      const origin = request.headers.get('Origin');
+
+      const requestOrigin = origin || (referer ? new URL(referer).origin : null);
+      
+      if (requestOrigin) {
+        const allowedList = allowedOrigins.split(',').map(domain => domain.trim());
+        const isAllowed = allowedList.some(allowedDomain => {
+          return requestOrigin === `https://${allowedDomain}` || 
+                 requestOrigin === `http://${allowedDomain}` ||
+                 requestOrigin.endsWith(`.${allowedDomain}`);
+        });
+        
+        if (!isAllowed) {
+          console.log(`Access denied for origin: ${requestOrigin}`);
+          return new Response('Access denied', { 
+            status: 403,
+            headers: {
+              'Content-Type': 'text/plain'
+            }
+          });
+        }
+      } else {
+        console.log('Access denied: No referer or origin header');
+        return new Response('Access denied: Direct access not allowed', { 
+          status: 403,
+          headers: {
+            'Content-Type': 'text/plain'
+          }
+        });
+      }
     }
 
     if (url.pathname === '/purge-cache') {
