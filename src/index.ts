@@ -7,107 +7,117 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    console.log(`Proxying request to: ${url.pathname}${url.search}`);
 
     if (url.pathname === '/' || url.pathname === '') {
       return Response.redirect('https://github.com/carolyn-sun/google-fonts-proxy-worker', 302);
     }
 
+    // --- 1. 安全性与严密性: CORS 严格校验 ---
     const allowedOrigins = env.ALLOWED_ORIGINS;
     if (allowedOrigins) {
       const referer = request.headers.get('Referer');
       const origin = request.headers.get('Origin');
 
       const requestOrigin = origin || (referer ? new URL(referer).origin : null);
-      
+
       if (requestOrigin) {
-        const allowedList = allowedOrigins.split(',').map(domain => domain.trim());
-        
+        // Support domains with or without protocol by cleaning them up
+        const allowedList = allowedOrigins.split(',').map(domain =>
+          domain.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
+        );
         const proxyDomain = env.PROXY_DOMAIN || url.host;
-        const isProxyDomain = requestOrigin === `https://${proxyDomain}` || 
-                             requestOrigin === `http://${proxyDomain}`;
-        
-        const isAllowed = isProxyDomain || allowedList.some(allowedDomain => {
-          return requestOrigin === `https://${allowedDomain}` || 
-                 requestOrigin === `http://${allowedDomain}` ||
-                 requestOrigin.endsWith(`.${allowedDomain}`);
-        });
-        
-        if (!isAllowed) {
-          console.log(`Access denied for origin: ${requestOrigin}`);
-          return new Response('Access denied', { 
+
+        try {
+          const originUrl = new URL(requestOrigin);
+          const hostname = originUrl.hostname;
+
+          const isProxyDomain = hostname === proxyDomain;
+          const isAllowed = isProxyDomain || allowedList.some(allowedDomain => {
+            return hostname === allowedDomain || hostname.endsWith(`.${allowedDomain}`);
+          });
+
+          if (!isAllowed) {
+            return new Response('Access denied: Origin not allowed', {
+              status: 403,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          }
+        } catch (e) {
+          return new Response('Access denied: Invalid origin format', {
             status: 403,
-            headers: {
-              'Content-Type': 'text/plain'
-            }
+            headers: { 'Content-Type': 'text/plain' }
           });
         }
       } else {
-        console.log('Access denied: No referer or origin header');
-        return new Response('Access denied: Direct access not allowed', { 
+        return new Response('Access denied: Direct access not allowed', {
           status: 403,
-          headers: {
-            'Content-Type': 'text/plain'
-          }
+          headers: { 'Content-Type': 'text/plain' }
         });
       }
     }
 
+    // --- 2. 缓存清理逻辑优化 ---
     if (url.pathname === '/purge-cache') {
       const providedKey = url.searchParams.get('key');
       const requiredKey = env.CACHE_PURGE_KEY;
-      
+
       if (requiredKey && providedKey !== requiredKey) {
         return new Response('Unauthorized', { status: 401 });
       }
-      
+
       const cache = caches.default;
       const targetUrl = url.searchParams.get('url');
-      
+
       if (targetUrl) {
         await cache.delete(targetUrl);
         return new Response(`Cache cleared for: ${targetUrl}`);
       } else {
-        const purgePromises = [];
-        const commonUrls = [
-          '/css',
-          '/css2',
-          '/s/'
-        ];
-        
-        for (const path of commonUrls) {
-          const cacheKey = new URL(path, url.origin).toString();
-          purgePromises.push(cache.delete(cacheKey));
-        }
-        
-        await Promise.all(purgePromises);
-        return new Response('Common cache entries cleared');
+        return new Response('Please specify a full cached URL via the "url" query parameter to purge. Example: /purge-cache?url=https...&key=...');
       }
     }
 
+    // --- 3. 严密性: 构建精确的目标 URL ---
     let targetHost: string;
-    if (url.pathname.startsWith('/css') || url.pathname.startsWith('/css2')) {
+    // Support material icons as well
+    if (url.pathname.startsWith('/css') || url.pathname.startsWith('/css2') || url.pathname.startsWith('/icon')) {
       targetHost = 'fonts.googleapis.com';
     } else {
       targetHost = 'fonts.gstatic.com';
     }
 
-    const targetUrl = `https://${targetHost}${url.pathname}${url.search}`;
+    const targetUrl = new URL(`https://${targetHost}${url.pathname}${url.search}`);
+
+    // --- 4. 安全性: 过滤请求头，防止泄露无用或敏感信息 (如 Cookie) 至 Google ---
+    const headers = new Headers();
+    const headersToForward = ['Accept', 'Accept-Language', 'User-Agent', 'Referer'];
+    headersToForward.forEach(header => {
+      const val = request.headers.get(header);
+      if (val) headers.set(header, val);
+    });
+
+    const userAgent = request.headers.get('User-Agent') || 'Unknown';
+
+    // --- 5. 性能与严密性: 基于 User-Agent 的 CSS 缓存隔离 ---
+    // Google serves totally different woff/woff2 font CSS links depending on browser UA!
+    const cacheUrl = new URL(request.url);
+    if (targetHost === 'fonts.googleapis.com') {
+      cacheUrl.searchParams.set('ua', userAgent);
+    }
+    const cacheKey = new Request(cacheUrl.toString(), request);
 
     const cache = caches.default;
-    let response = await cache.match(request);
+    let response = await cache.match(cacheKey);
 
     if (response) {
-      console.log('Cache hit!');
       const cachedResponse = new Response(response.body, response);
       cachedResponse.headers.set('Access-Control-Allow-Origin', '*');
       return cachedResponse;
     }
 
     try {
-      const proxyRequest = new Request(targetUrl, {
+      const proxyRequest = new Request(targetUrl.toString(), {
         method: request.method,
-        headers: request.headers,
+        headers: headers,
         redirect: 'follow'
       });
 
@@ -119,47 +129,41 @@ export default {
         if (targetHost === 'fonts.googleapis.com') {
           try {
             const arrayBuffer = await response.arrayBuffer();
-            const cssText = new TextDecoder().decode(arrayBuffer);
-            console.log(`Original CSS snippet: ${cssText.substring(0, 200)}...`);
+            const cssText = new TextDecoder('utf-8').decode(arrayBuffer);
 
             const proxyDomain = env.PROXY_DOMAIN || url.host;
             const proxyUrl = `https://${proxyDomain}`;
 
-            let modifiedCss = cssText
-              .replace(/url\(['"]https:\/\/fonts\.gstatic\.com\//g, `url('${proxyUrl}/`)
-              .replace(/url\(['"]https:\/\/fonts\.googleapis\.com\//g, `url('${proxyUrl}/`)
-              .replace(/url\(https:\/\/fonts\.gstatic\.com\//g, `url(${proxyUrl}/`)
-              .replace(/url\(https:\/\/fonts\.googleapis\.com\//g, `url(${proxyUrl}/`)
-              .replace(/https:\/\/fonts\.gstatic\.com\//g, `${proxyUrl}/`)
-              .replace(/https:\/\/fonts\.googleapis\.com\//g, `${proxyUrl}/`);
+            // 全局包含且容错地替换所有 Google Fonts 连接为当前代理地址
+            const modifiedCss = cssText.replace(/https?:\/\/(fonts\.gstatic\.com|fonts\.googleapis\.com)/g, proxyUrl);
 
-            console.log(`Modified CSS snippet: ${modifiedCss.substring(0, 200)}...`);
-            console.log(`Using proxy domain: ${proxyDomain}`);
-
-            proxyResponse = new Response(modifiedCss, response);
-            proxyResponse.headers.set('Content-Type', 'text/css');
+            proxyResponse = new Response(modifiedCss, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: new Headers(response.headers)
+            });
+            proxyResponse.headers.set('Content-Type', 'text/css; charset=utf-8');
           } catch (modError: unknown) {
             console.error(`CSS modification error: ${(modError as Error).message}`);
             proxyResponse = new Response(response.body, response);
           }
         } else {
           proxyResponse = new Response(response.body, response);
-          
-          const contentType = response.headers.get('Content-Type');
-          if (contentType) {
-            proxyResponse.headers.set('Content-Type', contentType);
-          }
         }
 
-        proxyResponse.headers.set('Cache-Control', 'public, max-age=315360');
+        // --- 6. 性能优化: 强制客户端长效缓存 (更新至1年=31536000秒) ---
+        proxyResponse.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
         proxyResponse.headers.set('Access-Control-Allow-Origin', '*');
 
-        ctx.waitUntil(cache.put(request, proxyResponse.clone()));
+        // 移除多余的安全头，避免体积开销影响加载性能
+        proxyResponse.headers.delete('X-Frame-Options');
+        proxyResponse.headers.delete('X-XSS-Protection');
 
-        console.log('Fetched and cached successfully');
+        ctx.waitUntil(cache.put(cacheKey, proxyResponse.clone()));
+
         return proxyResponse;
       } else {
-        console.log(`Google response error: ${response.status}`);
+        console.error(`Google response error: ${response.status} for ${targetUrl.toString()}`);
         return new Response(`Proxy failed: Google returned ${response.status}`, { status: response.status });
       }
     } catch (error: unknown) {
